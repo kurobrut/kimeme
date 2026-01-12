@@ -1,0 +1,287 @@
+-- Decompiled utility module (cleaned)
+
+local Utils = {}
+Utils.__index = Utils
+
+-- Services / player
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+-- Thread identity helpers
+local getId = getthreadidentity or getidentity
+local setId = setthreadidentity or setidentity
+
+-- Core modules
+local ClientData = require(ReplicatedStorage.ClientModules.Core.ClientData)
+local RouterClient = require(ReplicatedStorage.ClientModules.Core.RouterClient.RouterClient)
+local InteriorsM = require(ReplicatedStorage.ClientModules.Core.InteriorsM.InteriorsM)
+
+----------------------------------------------------------------
+-- String helpers
+----------------------------------------------------------------
+
+function Utils.getLastPathSegment(path)
+	return string.match(path, ".*/(.*)")
+end
+
+function Utils.isOnlyLetters(str)
+	return str:match("^[A-Za-z]+$") ~= nil
+end
+
+function Utils.getLeadingNumber(str)
+	return string.match(str, "^(%d+)")
+end
+
+function Utils.getTextInBrackets(str)
+	return string.match(str, "%((.-)%)")
+end
+
+function Utils.isTableEmpty(tbl)
+	return next(tbl) == nil
+end
+
+function Utils.getFirstSixChars(str)
+	return string.sub(str, 1, 6)
+end
+
+function Utils.extractInteriorName(name)
+	local excl = string.find(name, "!")
+	local colon = string.find(name, "::")
+
+	if excl then
+		return string.sub(name, 1, excl - 1)
+	end
+
+	if colon then
+		return string.sub(name, 1, colon - 1)
+	end
+
+	return name
+end
+
+function Utils.naturalSort(a, b)
+	local function pad(n)
+		return ("%09d"):format(tonumber(n) or 0)
+	end
+
+	return a:gsub("(%d+)", pad) < b:gsub("(%d+)", pad)
+end
+
+----------------------------------------------------------------
+-- Location / interior helpers
+----------------------------------------------------------------
+
+function Utils.getPlayerInterior()
+	local house = workspace:FindFirstChild("HouseInteriors")
+	local interiors = workspace:FindFirstChild("Interiors")
+
+	if house and house.furniture:FindFirstChildWhichIsA("Folder") then
+		local folder = house.furniture:FindFirstChildWhichIsA("Folder")
+		local blueprint = house.blueprint:FindFirstChildWhichIsA("Model")
+
+		if folder and folder.Name:find(LocalPlayer.Name) then
+			return "House"
+		end
+
+		if blueprint and blueprint.Name:find(LocalPlayer.Name) then
+			return "House"
+		end
+	end
+
+	if interiors and interiors:FindFirstChildWhichIsA("Model") then
+		return Utils.extractInteriorName(interiors:FindFirstChildWhichIsA("Model").Name)
+	end
+
+	return nil
+end
+
+function Utils.getCurrentInteriorId()
+	return InteriorsM.get_current_location().destination_id
+end
+
+----------------------------------------------------------------
+-- ClientData shortcuts
+----------------------------------------------------------------
+
+function Utils.getInventory()
+	return ClientData.get_data()[LocalPlayer.Name].inventory
+end
+
+function Utils.getMoney()
+	return ClientData.get_data()[LocalPlayer.Name].money
+end
+
+function Utils.getHouseInterior()
+	return ClientData.get_server(LocalPlayer, "house_interior").player
+end
+
+function Utils.getAilmentsManager()
+	return ClientData.get_server(LocalPlayer, "ailments_manager")
+end
+
+function Utils.getEquippedPets()
+	return ClientData.get_data()[LocalPlayer.Name].equip_manager.pets
+end
+
+function Utils.getPetEntityManager()
+	return require(ReplicatedStorage.ClientModules.Game.PetEntities.PetEntityManager)
+end
+
+function Utils.InventoryDB()
+	return require(ReplicatedStorage.ClientDB.Inventory.InventoryDB)
+end
+
+function Utils.has2xPets()
+	return ClientData.get("subscription_manager").equip_2x_pets.active
+end
+
+----------------------------------------------------------------
+-- LocationAPI hook (SetLocation)
+----------------------------------------------------------------
+
+local gc = getgc()
+local locationFn
+
+for _, obj in pairs(gc) do
+	if type(obj) == "function"
+		and islclosure(obj)
+		and table.find(getconstants(obj), "LocationAPI/SetLocation") then
+		locationFn = obj
+		break
+	end
+end
+
+local function callLocation(dest, door, args)
+	local old = getId()
+	setId(2)
+	locationFn(dest, door, args)
+	setId(old)
+end
+
+----------------------------------------------------------------
+-- Teleport helpers
+----------------------------------------------------------------
+
+local function getInteriorModel()
+	return workspace.Interiors:FindFirstChildWhichIsA("Model")
+end
+
+function Utils.goToStore(storeName)
+	local model = getInteriorModel()
+	if model and model.Name == storeName then
+		return true
+	end
+	callLocation(storeName, "MainDoor", {})
+	return true
+end
+
+function Utils.goToMainMap()
+	callLocation("MainMap", "Neighborhood/MainDoor", {})
+end
+
+function Utils.goToHome()
+	callLocation("housing", "MainDoor", { house_owner = LocalPlayer })
+end
+
+function Utils.goToNeighborhood()
+	callLocation("Neighborhood", "MainDoor", {})
+end
+
+----------------------------------------------------------------
+-- RouterClient wrapper
+----------------------------------------------------------------
+
+function Utils.runRouter(fire, route, args)
+	local old = getId()
+	setId(2)
+
+	if fire then
+		RouterClient.get(route):FireServer(unpack(args or {}))
+	else
+		RouterClient.get(route):InvokeServer(unpack(args or {}))
+	end
+
+	setId(old)
+end
+
+----------------------------------------------------------------
+-- Inventory / pet utilities
+----------------------------------------------------------------
+
+function Utils.getPotionCount()
+	local count = 0
+	for _, item in pairs(Utils.getInventory().food) do
+		if item.kind == "pet_age_potion" then
+			count += 1
+		end
+	end
+	return count
+end
+
+function Utils.setTeamParents()
+	Utils.runRouter(false, "TeamAPI/ChooseTeam", {
+		"Parents",
+		{ dont_respawn = true, source_for_logging = "avatar_editor" }
+	})
+end
+
+function Utils.setTeamBaby()
+	Utils.runRouter(false, "TeamAPI/ChooseTeam", {
+		"Babies",
+		{ dont_respawn = true, source_for_logging = "avatar_editor" }
+	})
+end
+
+function Utils.getPetConfig(petId)
+	local inv = Utils.getInventory().pets
+	if inv[petId] then
+		return {
+			kind = inv[petId].kind,
+			age = inv[petId].properties.age
+		}
+	end
+	return nil
+end
+
+function Utils.equipPet(id, last)
+	Utils.runRouter(false, "ToolAPI/Equip", {
+		id,
+		{ equip_as_last = last or false, use_sound_delay = false }
+	})
+end
+
+function Utils.unequipPet(id, last)
+	Utils.runRouter(false, "ToolAPI/Unequip", {
+		id,
+		{ equip_as_last = last or false, use_sound_delay = false }
+	})
+end
+
+function Utils.unequipAllPets()
+	for _, pet in pairs(Utils.getEquippedPets()) do
+		if pet.unique then
+			Utils.unequipPet(pet.unique)
+		end
+	end
+end
+
+----------------------------------------------------------------
+-- Furniture lookup
+----------------------------------------------------------------
+
+function Utils.getFurnitureIdByName(name)
+	local furniture = workspace.HouseInteriors.furniture
+
+	for _, folder in pairs(furniture:GetChildren()) do
+		for _, item in pairs(folder:GetChildren()) do
+			if item.Name == name then
+				return Utils.getLastPathSegment(folder.Name)
+			end
+		end
+	end
+
+	return false
+end
+
+return Utils
