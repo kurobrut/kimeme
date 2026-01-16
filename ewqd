@@ -74,22 +74,6 @@ end
 local AdoptMeConfigs = loadstring(game:HttpGet('https://raw.githubusercontent.com/TbiGui/Extras/refs/heads/main/Gui'))()
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local timemodule = require(game:GetService("ReplicatedStorage").SharedModules.Game.LiveOpsTime)
-
-if hookfunction and clonefunction and not getgenv().AlreadySimHook then
-	getgenv().AlreadySimHook = true
-	local old; old = hookfunction(Icemodule.create_simulation, function(...)
-		local returned = old(...)
-		getgenv().simulation = returned
-		return returned
-	end)
-	getgenv().destroySim = clonefunction(Icemodule.destroy_simulation)
-	hookfunction(Icemodule.destroy_simulation, function(...)
-		getgenv().simulation = nil
-		return getgenv().destroySim(...)
-	end)
-end
-
 local runService = game:GetService("RunService")
 local virtualUser = game:service("VirtualUser")
 local HttpService = game:GetService("HttpService")
