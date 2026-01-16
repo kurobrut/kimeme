@@ -74,7 +74,6 @@ end
 local AdoptMeConfigs = loadstring(game:HttpGet('https://raw.githubusercontent.com/TbiGui/Extras/refs/heads/main/Gui'))()
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local Icemodule = require(game:GetService("ReplicatedStorage").SharedModules.ContentPacks.IceDimension2025.Minigames.IceCubeSimulation)
 local timemodule = require(game:GetService("ReplicatedStorage").SharedModules.Game.LiveOpsTime)
 
 if hookfunction and clonefunction and not getgenv().AlreadySimHook then
@@ -196,10 +195,6 @@ local AutoFarmFunctions = {
 		State = false,
 		Running = false
 	},
-	["AutofarmIceDimension"] = {
-		State = false,
-		Running = false
-	}
 }
 
 local ExtraFunctions = {
@@ -1028,24 +1023,6 @@ end
 
 local EventSection = AutofarmTab:CreateSection("Events")
 
-AutofarmIceDimensionToggle = AutofarmTab:CreateToggle({
-	Name = "Autofarm Ice Dimension",
-	CurrentValue = false,
-	Flag = "AutofarmIceDimensionToggle",
-	Callback = function(Value)
-		if Value then
-			if not IsOtherAutofarmOn("AutofarmIceDimension") then
-				AutoFarmFunctions.AutofarmIceDimension.State = Value
-			else
-				Notification("Please turn off (" .. GetActivAutofarm() .. ") to be able to use this one!")
-				AutofarmIceDimensionToggle:Set(false)
-				SetPlatformForPlayer(false)
-			end
-		else
-			AutoFarmFunctions.AutofarmIceDimension.State = Value
-		end
-	end,
-})
 
 local BucksSection = BucksTab:CreateSection("Settings")
 
@@ -2796,61 +2773,6 @@ function IsCubeStillThere(CubeName)
 	end
 end
 
-local AutofarmIceDimensionFunc = function()
-
-	if hookfunction and clonefunction then
-	else
-		Notification("Your executer doesnt support this option!")
-		AutofarmIceDimensionToggle:Set(false)
-		AutoFarmFunctions.AutofarmIceDimension.Running = false
-		return
-	end
-
-	local success, err = pcall(function()
-		if AdoptMeConfigs.GetCurrentInterior() ~= "IceDimension" and AdoptMeConfigs.GetCurrentInterior() ~= "IceCubeHillMinigame" then
-			AdoptMeConfigs.GoToStore("IceDimension")
-			if not require(game.ReplicatedStorage.SharedModules.ContentPacks.IceDimension2025.Minigames.IceCubeHillMinigameClient).is_queued then
-				local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-				if character then
-					local targetCFrame = workspace.Interiors["IceDimension"].JoinZones.IceCubeHillMinigame.Ring.CFrame
-					character:SetPrimaryPartCFrame(CFrame.new(3205.9375, 6069.955078125, 15875.58984375, 1, 0, 0, 0, 1, 0, 0, 0, 1))
-				end
-				task.wait(1)
-			end			
-		end
-
-		if getgenv().simulation and AutoFarmFunctions.AutofarmIceDimension.State then
-			for i,v in pairs(getgenv().simulation.active_ice_cubes) do
-				repeat
-					task.wait(0.05)
-					if v.model then
-						LocalPlayer.Character.HumanoidRootPart.CFrame = v.model.PrimaryPart.CFrame + Vector3.new(0,5,0)
-						local args = {
-							[1] = "ice_cube_hill_minigame",
-							[2] = "attempt_hit",
-							[3] = v.id,
-							[4] = v.model.PrimaryPart.Position + Vector3.new(7,0,0),
-							[5] = v.tick,
-							[6] = timemodule.now()
-						}
-						AdoptMeConfigs.RunRouterClient(true, "MinigameAPI/MessageServer", args)
-					end
-				until not getgenv().simulation.active_ice_cubes[i] or not AutoFarmFunctions.AutofarmIceDimension.State
-				break
-			end
-		end	
-
-		AutoFarmFunctions.AutofarmIceDimension.Running = false
-	end)
-
-
-
-	if not success then
-		warn("Something went wrong: " .. err)
-		AutoFarmFunctions.AutofarmIceDimension.Running = false
-	end
-end
-
 local PlayerInfoUpdate = function(SetLabel)
 	local Success, err = pcall(function()
 		local NewPlayerMoney = AdoptMeConfigs.GetPlayerMoney()
@@ -2910,10 +2832,6 @@ runService.RenderStepped:Connect(function()
 			if AutoFarmFunctions.AutoGiveAgePotions.State and not AutoFarmFunctions.AutoGiveAgePotions.Running and not IsOtherAutofarmOn("AutoGiveAgePotions") then
 				AutoFarmFunctions.AutoGiveAgePotions.Running = true
 				AutoGivePetAgePotionsFunc()
-			end
-			if AutoFarmFunctions.AutofarmIceDimension.State and not AutoFarmFunctions.AutofarmIceDimension.Running and not IsOtherAutofarmOn("AutofarmIceDimension") then
-				AutoFarmFunctions.AutofarmIceDimension.Running = true
-				AutofarmIceDimensionFunc()
 			end
 		end)
 
