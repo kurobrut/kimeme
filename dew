@@ -1,83 +1,127 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
-local net = ReplicatedStorage:WaitForChild("adoptme_new_net")
-
--- Try to find the remotes (recursive search under adoptme_new_net)
-local carveRemote   = net:FindFirstChild("CandyCliffCarve", true)
-local consumeRemote = net:FindFirstChild("CandyCliffConsumeChisel", true)
-
-if not carveRemote then
-    warn("CandyCliffCarve RemoteFunction not found anywhere under adoptme_new_net!")
-    warn("Try this debug script to locate it:")
-    warn([[ 
-for _, obj in net:GetDescendants() do
-    if (obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent")) and obj.Name:find("CandyCliff") then
-        print(obj:GetFullName())
-    end
-end ]])
+local net = ReplicatedStorage:WaitForChild("adoptme_new_net", 10)
+if not net then
+    warn("adoptme_new_net not found!")
     return
 end
 
-if not consumeRemote then
-    warn("CandyCliffConsumeChisel not found — chisel auto-consume won't work, but carving might still spam.")
+-- Improved remote finder with full path printing
+local function findRemote(name)
+    for _, obj in ipairs(net:GetDescendants()) do
+        if (obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent")) and obj.Name == name then
+            print("FOUND REMOTE:", name, "at →", obj:GetFullName())
+            return obj
+        end
+    end
+    return nil
+end
+
+local carveRemote   = findRemote("CandyCliffCarve")
+local consumeRemote = findRemote("CandyCliffConsumeChisel")
+
+if not carveRemote then
+    warn("CandyCliffCarve NOT FOUND! Run this in executor to debug:")
+    warn([[
+for _, obj in net:GetDescendants() do
+    if obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent") then
+        if obj.Name:find("Candy") or obj.Name:find("Cliff") or obj.Name:find("Chisel") then
+            print(obj:GetFullName())
+        end
+    end
+end
+    ]])
+    return
 end
 
 local ClientData = require(ReplicatedStorage.ClientModules.Core.ClientData)
 local LocalPlayer = Players.LocalPlayer
 
-local function getClientCarveData()
+local function getClientCarveInfo()
     local data = ClientData.get_data()
     if not data then return nil end
-    
+
     local playerData = data[LocalPlayer.Name]
     if not playerData then return nil end
-    
+
     local manager = playerData.sugarfest_2026_candy_cliff_manager
     if not manager then return nil end
-    
+
     return {
-        carve_count     = manager.carve_count     or 0,
-        remaining_carves = manager.remaining_carves or 0
+        carve_count      = manager.carve_count or 0,
+        remaining_carves = manager.remaining_carves or 0,
+        has_chisel       = false  -- we'll check inventory below
     }
 end
 
-print("Candy Cliffs auto-carve script started — waiting for valid data...")
-
-while true do
-    task.wait(0.12)  -- ~8 invokes/sec — adjust higher if kicked for spam
-
-    local info = getClientCarveData()
-    if not info then
-        continue  -- no data yet / not loaded
-    end
-
-    local count = info.carve_count
-
-    -- Only try to carve if server thinks you have carves left (client mirror)
-    if info.remaining_carves <= 0 then
-        -- Optional: try to consume a chisel automatically if you have one
-        if consumeRemote then
-            pcall(function()
-                local success = consumeRemote:InvokeServer()
-                if success then
-                    print("Consumed a chisel → gained 21 carves")
-                end
-            end)
+-- Check if player has at least one Candy Chisel in inventory
+local function hasCandyChisel()
+    local data = ClientData.get_data()
+    if not data then return false end
+    local inv = data[LocalPlayer.Name].inventory.gifts or {}
+    for _, item in pairs(inv) do
+        if item.kind == "sugarfest_2026_candy_chisel" then
+            return true
         end
-        task.wait(1)  -- slower when no carves
+    end
+    return false
+end
+
+print("Auto-Carve started. Waiting for Candy Cliff data... (equip chisel & enter cliff first!)")
+
+local lastAttempt = 0
+while true do
+    task.wait(0.45 + math.random() * 0.35)  -- ~2 invokes/sec + jitter to look less bot-like
+
+    local info = getClientCarveInfo()
+    if not info then
+        if tick() - lastAttempt > 5 then
+            print("No Candy Cliff data yet — make sure you're in the cliff minigame!")
+            lastAttempt = tick()
+        end
         continue
     end
 
-    pcall(function()
-        local response = carveRemote:InvokeServer({
-            carve_amount = count  -- server ignores this value anyway — it always does 1 carve
-        })
-
-        if response == true then
-            -- print("Carved successfully! Total:", count + 1)
-        elseif response == false then
-            warn("Server rejected carve (probably out of carves or anti-spam)")
+    -- Auto-consume chisel if out of carves and have one
+    if info.remaining_carves <= 0 and hasCandyChisel() and consumeRemote then
+        print("Attempting to consume chisel...")
+        local success, result = pcall(function()
+            return consumeRemote:InvokeServer()
+        end)
+        if success and result == true then
+            print("Chisel consumed → +21 carves!")
+        elseif success then
+            warn("Consume failed (server returned false) — no chisel or already active?")
+        else
+            warn("Consume error:", tostring(result))
         end
+        task.wait(1.2)  -- give time for replication
+        continue
+    end
+
+    if info.remaining_carves <= 0 then
+        continue  -- wait for chisel or manual action
+    end
+
+    print("Carving attempt | client carves:", info.remaining_carves, "| total count:", info.carve_count)
+
+    local success, response = pcall(function()
+        return carveRemote:InvokeServer({
+            carve_amount = info.carve_count  -- server ignores value, but send current to look legit
+        })
     end)
+
+    if success then
+        if response == true then
+            print("Success! Carved 1 piece → total now ~", info.carve_count + 1)
+        elseif response == false then
+            warn("Server rejected (out of carves, rate limit, or not in minigame)")
+        else
+            warn("Unexpected response:", tostring(response))
+        end
+    else
+        warn("Invoke failed / kicked risk:", tostring(response))
+    end
 end
