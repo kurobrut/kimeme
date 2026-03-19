@@ -1,0 +1,83 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local net = ReplicatedStorage:WaitForChild("adoptme_new_net")
+
+-- Try to find the remotes (recursive search under adoptme_new_net)
+local carveRemote   = net:FindFirstChild("CandyCliffCarve", true)
+local consumeRemote = net:FindFirstChild("CandyCliffConsumeChisel", true)
+
+if not carveRemote then
+    warn("CandyCliffCarve RemoteFunction not found anywhere under adoptme_new_net!")
+    warn("Try this debug script to locate it:")
+    warn([[ 
+for _, obj in net:GetDescendants() do
+    if (obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent")) and obj.Name:find("CandyCliff") then
+        print(obj:GetFullName())
+    end
+end ]])
+    return
+end
+
+if not consumeRemote then
+    warn("CandyCliffConsumeChisel not found — chisel auto-consume won't work, but carving might still spam.")
+end
+
+local ClientData = require(ReplicatedStorage.ClientModules.Core.ClientData)
+local LocalPlayer = Players.LocalPlayer
+
+local function getClientCarveData()
+    local data = ClientData.get_data()
+    if not data then return nil end
+    
+    local playerData = data[LocalPlayer.Name]
+    if not playerData then return nil end
+    
+    local manager = playerData.sugarfest_2026_candy_cliff_manager
+    if not manager then return nil end
+    
+    return {
+        carve_count     = manager.carve_count     or 0,
+        remaining_carves = manager.remaining_carves or 0
+    }
+end
+
+print("Candy Cliffs auto-carve script started — waiting for valid data...")
+
+while true do
+    task.wait(0.12)  -- ~8 invokes/sec — adjust higher if kicked for spam
+
+    local info = getClientCarveData()
+    if not info then
+        continue  -- no data yet / not loaded
+    end
+
+    local count = info.carve_count
+
+    -- Only try to carve if server thinks you have carves left (client mirror)
+    if info.remaining_carves <= 0 then
+        -- Optional: try to consume a chisel automatically if you have one
+        if consumeRemote then
+            pcall(function()
+                local success = consumeRemote:InvokeServer()
+                if success then
+                    print("Consumed a chisel → gained 21 carves")
+                end
+            end)
+        end
+        task.wait(1)  -- slower when no carves
+        continue
+    end
+
+    pcall(function()
+        local response = carveRemote:InvokeServer({
+            carve_amount = count  -- server ignores this value anyway — it always does 1 carve
+        })
+
+        if response == true then
+            -- print("Carved successfully! Total:", count + 1)
+        elseif response == false then
+            warn("Server rejected carve (probably out of carves or anti-spam)")
+        end
+    end)
+end
